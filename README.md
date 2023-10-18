@@ -2,7 +2,7 @@
 
 You can find the non-softmax settings in `cramming/config/arch/crammed-bert.yaml`. In `crammed-bert.yaml`,
 * If you want to pretrain with original softmax attention, set `architectures=ScriptableCrammedBERT`, `attention.type=self-attention` and `attention.sequence_op=torch-softmax`.
-* If you want to pretrain with non-softmax attention, set `architectures=ScriptableCrammedBERT-modified`, `attention.type=self-attention-modified` and `attention.sequence_op={what you want}`. The sequence_op includes `exp, exp_power_app, exp_poly_app`, etc.
+* If you want to pretrain with non-softmax attention, set `architectures=ScriptableCrammedBERT-modified`, `attention.type=self-attention-modified` and `attention.sequence_op={what you want}`. The sequence_op includes `exp, exp_power_app and exp_poly_app`, etc.
 
 If you want to pretrain model in our setting, run in terminal:
 ```
@@ -13,6 +13,7 @@ If you want to evaluate the pretrained model:
 python eval.py eval=GLUE_sane name={your_name} eval.checkpoint=latest impl.microbatch_size=16 impl.shuffle_in_dataloader=True impl.compile_torch=False
 ```
 
+In `cramming/config/cfg_pretrain.yaml`, you can adjust budget, the total training time.
 # Cramming Language Model (Pretraining)
 
 This repository contains code to replicate our research described in "Cramming: Training a Language Model on a Single GPU in One Day". We experiment with language model pretraining a BERT-type model with limited compute, wondering "how bad can it really be"?

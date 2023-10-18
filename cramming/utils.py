@@ -193,18 +193,10 @@ def find_pretrained_checkpoint(cfg, downstream_classes=None):
     """Load a checkpoint either locally or from the internet."""
     local_checkpoint_folder = os.path.join(cfg.base_dir, cfg.name, "checkpoints")
     if cfg.eval.checkpoint == "latest":
-        # print('cfg.eval.ckpt_num', cfg.eval.ckpt_num, type(cfg.eval.ckpt_num))
         # Load the latest local checkpoint
         all_checkpoints = [f for f in os.listdir(local_checkpoint_folder)]
         checkpoint_paths = [os.path.join(local_checkpoint_folder, c) for c in all_checkpoints]
-        # print('checkpoint_paths', checkpoint_paths)
-        # checkpoint_name = max(checkpoint_paths, key=os.path.getctime)
-        checkpoint_name = checkpoint_paths[cfg.eval.ckpt_num]
-        # print('os.path.getmtime', os.path.getmtime(checkpoint_paths[0]))
-        # for i in range(len(checkpoint_paths)):
-        #     print('os.path.getctime {}'.format(checkpoint_paths[i]), os.path.getctime(checkpoint_paths[i]))
-    
-        print('checkpoint_name', checkpoint_name)
+        checkpoint_name = max(checkpoint_paths, key=os.path.getmtime)
     elif cfg.eval.checkpoint == "smallest":
         # Load maybe the local checkpoint with smallest loss
         all_checkpoints = [f for f in os.listdir(local_checkpoint_folder)]
@@ -221,9 +213,6 @@ def find_pretrained_checkpoint(cfg, downstream_classes=None):
         cfg_arch = transformers.AutoConfig.from_pretrained(model_name)
         model_file = cfg.eval.checkpoint
         checkpoint_name = None
-    elif cfg.eval.checkpoint == 'select':
-        print('cfg.eval.checkpoint == select')
-        print('cfg.eval.ckpt_num', cfg.eval.ckpt_num)
     
     else:
         # Look for this name as an absolute path
@@ -245,8 +234,6 @@ def find_pretrained_checkpoint(cfg, downstream_classes=None):
         if cfg.eval.arch_modifications is not None:
             cfg_arch = OmegaConf.merge(cfg_arch, cfg.eval.arch_modifications)
         model_file = os.path.join(checkpoint_name, "model.safetensors")
-
-        # print(cfg_arch)
 
     log.info(f"Loading from checkpoint {model_file}...")
     return tokenizer, cfg_arch, model_file

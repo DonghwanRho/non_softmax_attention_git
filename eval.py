@@ -18,9 +18,7 @@ import evaluate
 from termcolor import colored
 
 log = logging.getLogger(__name__)
-'''
-python eval.py eval=GLUE_sane name=dhrho eval.checkpoint=latest impl.microbatch_size=16 impl.shuffle_in_dataloader=True impl.compile_torch=False eval.ckpt_num=8
-'''
+
 def main_downstream_process(cfg, setup):
     """This function controls the central routine."""
     local_time = time.time()
@@ -36,8 +34,6 @@ def main_downstream_process(cfg, setup):
     
     # Start the clocks now:
     for task_name, task in tasks.items():
-        print(colored('task_name: {}'.format(task_name), 'red'))
-        print(colored('task: {}'.format(task), 'red'))
         cfg.eval.steps = len(task["trainloader"]) * cfg.eval.epochs
         log.info(f"Finetuning task {task_name} with {task['num_classes']} classes for {cfg.eval.steps} steps.")
         # Prepare model for finetuning:
@@ -45,31 +41,12 @@ def main_downstream_process(cfg, setup):
         cfg_arch.task_name = task_name
         
         model = cramming.construct_model(cfg_arch, tokenizer.vocab_size, downstream_classes=task["num_classes"])
-        print('eval 48 model', model)
-        # 여기서 inference시 op_sequence 수정 가능
-        # cfg_arch.num_transformers_layers
         
-        # freeze except classification head or attention layers
-        # for name, param in model.named_parameters():
-        #     if 'attn' in name or 'head' in name:
-        #         param.requires_grad = True
-        #     else:
-        #         param.requires_grad = False
-        for name, param in model.named_parameters():
-            if param.requires_grad == True:
-                log.info(f'{name} {param.requires_grad}')
-            else:
-                print(f'{name} {param.requires_grad}')
-        # log.info(f"Model: {model}")
-            
-        # print(colored('model_engine, _, _, _', 'red'))
         model_engine, _, _, _ = cramming.load_backend(model, None, tokenizer, cfg.eval, cfg.impl, setup=setup)
-        # print(colored('model_engine.load_checkpoint(cfg_arch, model_file)', 'red'))
         model_engine.load_checkpoint(cfg_arch, model_file)
 
         try:
             assert task_name != "record"
-            # print('assert task_name != "record"')
             metric = evaluate.load(task["details"]["collection"], task_name, cache_dir=cfg.impl.path)
         except (FileNotFoundError, AssertionError):  # no specific metric downloadable from evaluate, construct directly
             print('(FileNotFoundError, AssertionError)')
@@ -87,13 +64,10 @@ def main_downstream_process(cfg, setup):
                 self_count += 1
                 # Heavy lifting is moved to engines
                 device_batch = model_engine.to_device(batch, keys=["input_ids", "labels", "attention_mask"])
-                # print(colored('loss = model_engine.step(device_batch)', 'yellow'))
                 loss = model_engine.step(device_batch)
                 loss_vals.append(loss.detach())
                 if cfg.dryrun:
                     break
-            
-            # print('self count: {}'.format(self_count))
             
             metrics[task_name] = validate(model_engine, task["validloader"], metric, setup, cfg)
             stats[f"{task_name}_epoch"] += [epoch]
