@@ -13,7 +13,7 @@ If you want to evaluate the pretrained model:
 python eval.py eval=GLUE_sane name={your_name} eval.checkpoint=latest impl.microbatch_size=16 impl.shuffle_in_dataloader=True impl.compile_torch=False
 ```
 
-In `cramming/config/cfg_pretrain.yaml`, you can adjust budget, the total training time.
+In `cramming/config/cfg_pretrain.yaml`, you can adjust `budget`, the total training time.
 # Cramming Language Model (Pretraining)
 
 This repository contains code to replicate our research described in "Cramming: Training a Language Model on a Single GPU in One Day". We experiment with language model pretraining a BERT-type model with limited compute, wondering "how bad can it really be"?
