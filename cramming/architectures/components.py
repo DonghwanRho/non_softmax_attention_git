@@ -14,22 +14,19 @@ INPLACE = False
 
 class EmbeddingComponent(torch.nn.Module):
     def __init__(self, cfg_embedding, norm, norm_eps):
-        # print('cfg_embedding', cfg_embedding)
         super().__init__()
         self.word_embedding = torch.nn.Embedding(
             cfg_embedding.vocab_size, cfg_embedding.embedding_dim, padding_idx=cfg_embedding.pad_token_id
         )
-        # print('self.word_embedding', self.word_embedding)
+        
         if cfg_embedding.pos_embedding == "learned":
             self.pos_embedding = LearnablePositional(cfg_embedding.embedding_dim, cfg_embedding.max_seq_length)
         elif cfg_embedding.pos_embedding == "sinusoidal":
             self.pos_embedding = SinusoidalPositional(cfg_embedding.embedding_dim, cfg_embedding.max_seq_length)
         elif cfg_embedding.pos_embedding == "scaled-sinusoidal":
             self.pos_embedding = ScaledSinosoidal(cfg_embedding.embedding_dim, cfg_embedding.max_seq_length)
-            # print('self.pos_embedding', self.pos_embedding)
         else:
             self.pos_embedding = None
-        # print('self.pos_embedding', self.pos_embedding)
         self.dropout = torch.nn.Dropout(p=cfg_embedding.dropout_prob, inplace=INPLACE)
         if cfg_embedding.normalization: # True
             self.stabilize_low_precision = cfg_embedding.get("stable_low_precision", False)
@@ -39,44 +36,31 @@ class EmbeddingComponent(torch.nn.Module):
             self.norm = torch.nn.Identity()
 
     def forward(self, input_ids):
-        # print('\n============== embed forward ==============')
-        # print('emb input_ids', input_ids.shape)
         embeds = self.word_embedding(input_ids)
-        # print('embeds', embeds.shape)
-        # print('emb embeds', embeds.shape)
+        
         if self.pos_embedding is not None:
             embeds += self.pos_embedding(input_ids)
-            # self.pos_embedding(input_ids): [1, max_seq_length, 768]
-            # print('embed forward self.pos_embedding(input_ids)', self.pos_embedding(input_ids).shape)
 
         if self.stabilize_low_precision:
             # Stabilize as in bnb StableEmbedding
-            # print('self.dropout(self.norm(embeds.to(torch.get_default_dtype()))).to(embeds.dtype)', self.dropout(self.norm(embeds.to(torch.get_default_dtype()))).to(embeds.dtype).shape)
             return self.dropout(self.norm(embeds.to(torch.get_default_dtype()))).to(embeds.dtype)
         else:
-            # 여기
-            # print('self.dropout(self.norm(embeds))', self.dropout(self.norm(embeds)).shape)
-            # print('============== embed forward end ==============\n')
             return self.dropout(self.norm(embeds))
 
 class EmbeddingComponent_modified(torch.nn.Module):
     def __init__(self, cfg_embedding, norm, norm_eps):
-        # print('cfg_embedding', cfg_embedding)
         super().__init__()
         self.word_embedding = torch.nn.Embedding(
             cfg_embedding.vocab_size, cfg_embedding.embedding_dim, padding_idx=cfg_embedding.pad_token_id
         )
-        # print('self.word_embedding', self.word_embedding)
         if cfg_embedding.pos_embedding == "learned":
             self.pos_embedding = LearnablePositional(cfg_embedding.embedding_dim, cfg_embedding.max_seq_length)
         elif cfg_embedding.pos_embedding == "sinusoidal":
             self.pos_embedding = SinusoidalPositional(cfg_embedding.embedding_dim, cfg_embedding.max_seq_length)
         elif cfg_embedding.pos_embedding == "scaled-sinusoidal":
             self.pos_embedding = ScaledSinosoidal(cfg_embedding.embedding_dim, cfg_embedding.max_seq_length)
-            # print('self.pos_embedding', self.pos_embedding)
         else:
             self.pos_embedding = None
-        # print('self.pos_embedding', self.pos_embedding)
         self.dropout = torch.nn.Dropout(p=cfg_embedding.dropout_prob, inplace=INPLACE)
         if cfg_embedding.normalization: # True
             self.stabilize_low_precision = cfg_embedding.get("stable_low_precision", False)
@@ -86,26 +70,13 @@ class EmbeddingComponent_modified(torch.nn.Module):
             self.norm = torch.nn.Identity()
 
     def forward(self, input_ids):
-        # print('\n============== embed_modified forward ==============')
-        # print('emb input_ids', input_ids.shape)
-        # print('modified emb input_ids', input_ids.shape)
         embeds = self.word_embedding(input_ids)
-        # embeds = embeds.to(dtype=torch.float64)
-        # print('embeds', embeds.shape)
-        # print('emb embeds', embeds.shape)
         if self.pos_embedding is not None:
             embeds += self.pos_embedding(input_ids)
-            # embeds = embeds.to(dtype=torch.float64)
-            # self.pos_embedding(input_ids): [1, max_seq_length, 768]
-            # print('embed forward self.pos_embedding(input_ids)', self.pos_embedding(input_ids).shape)
-        # self.norm = self.norm.to(dtype=torch.float64)
         if self.stabilize_low_precision:
             # Stabilize as in bnb StableEmbedding
             return self.dropout(self.norm(embeds.to(torch.get_default_dtype()))).to(embeds.dtype)
         else:
-            # 여기
-            # print('self.dropout(self.norm(embeds))', self.dropout(self.norm(embeds)).shape)
-            # print('============== embed_modified forward end ==============\n')
             return self.dropout(self.norm(embeds))
 
 
@@ -113,7 +84,6 @@ class AttentionComponent(torch.nn.Module):
     def __init__(self, idx, hidden_size, cfg_attention, use_bias=True):
         super().__init__()
         self.self_attention = get_attention_mechanism(idx, hidden_size, cfg_attention)
-        # print('cfg_attention.high_level_fusion', cfg_attention.high_level_fusion)
 
         if cfg_attention.high_level_fusion:
             self.self_attention = torch.jit.script(self.self_attention)
@@ -160,10 +130,8 @@ class PoolingComponent(torch.nn.Module):
 
     def forward(self, hidden_states):
         """A variety of pooling options. Some ignore the cls token. Input needs to be B S H."""
-        # print('hidden_states', hidden_states.shape)
         if self.pool_scheme == "zero_index":
             first_token_tensor = hidden_states[:, 0]
-            # print('first_token_tensor', first_token_tensor.shape)
         elif self.pool_scheme == "avg":
             first_token_tensor = hidden_states.mean(dim=1)
         elif self.pool_scheme == "max":

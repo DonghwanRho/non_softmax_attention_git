@@ -13,10 +13,8 @@ _default_setup = dict(device=torch.device("cpu"), dtype=torch.float)
 
 
 def load_backend(model, dataset, tokenizer, cfg_train, cfg_impl, elapsed_time=0.0, setup=_default_setup):
-    print(colored('load_backend', 'blue'))
+    
     if cfg_impl.name == "torch-default":
-        # 여기
-        print(colored('cfg_impl.name == "torch-default"', 'blue'))
         return initialize_torch(model, dataset, tokenizer, cfg_train, cfg_impl, elapsed_time, setup=setup)
     elif cfg_impl.name == "deepspeed":
         return initialize_deepspeed(model, dataset, tokenizer, cfg_train, cfg_impl, setup=setup)  # cannot resume

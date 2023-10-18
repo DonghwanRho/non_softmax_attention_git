@@ -41,7 +41,6 @@ warnings.filterwarnings("ignore", "Detected call of ", UserWarning)  # scheduler
 def initialize_torch(model, dataset, tokenizer, cfg_train, cfg_impl, elapsed_time, setup=_default_setup):
     """initialize a torch engine."""
     if dataset is not None:
-        print(colored('dataloader = prepare_pretraining_dataloader', 'magenta'))
         dataloader = prepare_pretraining_dataloader(dataset, tokenizer, cfg_train, cfg_impl)
     else:
         dataloader = None
@@ -50,11 +49,8 @@ def initialize_torch(model, dataset, tokenizer, cfg_train, cfg_impl, elapsed_tim
     require_full_engine = "sequence_curriculum" in cfg_train or "weight_averaging" in cfg_train or "gradinit" in cfg_train
 
     if require_full_engine:
-        # print('require_full_engine')
         model_engine = TorchEngineFull(model, cfg_train, cfg_impl, elapsed_time, setup=setup, seq_length=tokenizer.model_max_length)
     else:
-        # print('not require_full_engine')
-        # 여기
         model_engine = TorchEngineMinimal(model, cfg_train, cfg_impl, elapsed_time, setup=setup, seq_length=tokenizer.model_max_length)
     model_engine.train()  # This is the default engine state. Pretraining scripts may change this.
     return model_engine, model_engine.optimizer, model_engine.scheduler, dataloader
@@ -69,8 +65,6 @@ class TorchEngineMinimal(torch.nn.Module):
     def __init__(self, model, cfg_train, cfg_impl, already_elapsed_time=0.0, setup=_default_setup, seq_length=128):
         """Load Engine. The model will be compiled by default."""
         super().__init__()
-        # 여기서 model은 아직 ScriptableLMForPreTraining
-        # print('TorchEngineMinimal model', model)
 
         self.cfg_train = cfg_train
         self.cfg_impl = cfg_impl
@@ -90,8 +84,7 @@ class TorchEngineMinimal(torch.nn.Module):
         self.amp_settings = dict(device_type=setup["device"].type, enabled=enabled, dtype=amp_dtype)
 
         # Choose setup and move model
-        self.setup = setup # device, dtype 정보
-        # print('self.setup', self.setup)
+        self.setup = setup
         model.to(**self.setup)
 
         from ..utils import flatten
@@ -107,17 +100,12 @@ class TorchEngineMinimal(torch.nn.Module):
         #     # detailed options; cannot be given at the same time as mode:
         #     options=flatten(cfg_impl._inductor_vars, parent_key="", sep=".") if cfg_impl._inductor_vars is not None else None,
         # )
-        # print('after compile model', model)
 
         if torch.distributed.is_initialized():
-            # print('torch.distributed.is_initialized()')
             self.model = self._init_distributed(model)
             self.num_machines = torch.distributed.get_world_size()
         else:
-            # print('not torch.distributed.is_initialized()')
-            # 여기
             self.model = model
-            # print('else model', model)
             self.model.no_sync = nullcontext
             self.num_machines = 1
 
@@ -132,7 +120,6 @@ class TorchEngineMinimal(torch.nn.Module):
         self.optimizer, self.scheduler = _load_optimizer(model, cfg_train, cfg_impl, self.initial_time)
 
     def step(self, batch: dict[str, torch.Tensor]):
-        # print(colored('torch_default.py TorchEngineMinimal step', 'green'))
         self.accumulated_samples += self.effective_mbs
         context = self.model.no_sync if self.accumulated_samples < self.current_batch_size else nullcontext
         with context():
@@ -140,17 +127,7 @@ class TorchEngineMinimal(torch.nn.Module):
             self.backward(loss)
             self.optimizer_step()
         return loss.detach()
-
-    def step_heatmap(self, batch: dict[str, torch.Tensor]):
-        # print(colored('torch_default.py TorchEngineMinimal step', 'green'))
-        self.accumulated_samples += self.effective_mbs
-        context = self.model.no_sync if self.accumulated_samples < self.current_batch_size else nullcontext
-        with context():
-            loss = self.forward(**batch)["loss"]
-            # self.backward(loss)
-            # self.optimizer_step()
-        return loss.detach()
-
+    
     def to_device(self, batch: dict[str, torch.Tensor], keys: list[str] = ["input_ids", "labels"]):
         """Move batch of data into device memory."""
         device_batch = {
@@ -165,7 +142,6 @@ class TorchEngineMinimal(torch.nn.Module):
             return self.model(*inputs, **kwargs)
 
     def backward(self, loss):
-        # print('torch_default, self.accumulation_steps_expected', self.accumulation_steps_expected)
         return self.scaler.scale(loss / self.accumulation_steps_expected).backward()
 
     @torch.no_grad()

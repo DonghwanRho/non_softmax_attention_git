@@ -22,9 +22,6 @@ def main_training_process(cfg, setup):
     """This function controls the central training loop."""
     local_time = time.time()
     model = cramming.construct_model(cfg.arch, cfg.data.vocab_size)
-    print(colored('Model {}'.format(model), 'green'))
-    print(colored('Model', 'green'))
-    # print(colored('Model.encoder: {}'.format(model.encoder), 'green'))
     
     # Dataset
     dataset, tokenizer = cramming.load_pretraining_corpus(cfg.data, cfg.impl)
@@ -40,9 +37,6 @@ def main_training_process(cfg, setup):
     else:
         initial_step, elapsed_time = 0, 0.0
 
-    # print(colored('cfg.train: {}'.format(cfg.train), 'green'))
-    # print(colored('cfg.impl: {}'.format(cfg.impl), 'green'))
-    # print(colored('dataset: {}'.format(dataset), 'green'))
     model_engine, _, _, dataloader = cramming.load_backend(model, dataset, tokenizer, cfg.train, cfg.impl, elapsed_time, setup=setup)
     if cfg.impl.resume_run_after_preempt and os.path.isfile(checkpoint_rendevous):
         log.info(f"Loading intermediate checkpoint from previous run onto device {cfg.impl.local_rank}...")
@@ -58,17 +52,11 @@ def main_training_process(cfg, setup):
 
     # Launch training
     for step, batch in enumerate(dataloader, initial_step + 1):
-        # print('step', step)
-        # 128 128
-        # print('batch[\'input_ids\']', batch['input_ids'].shape)
-        # 128 128
-        # print('batch[\'labels\']', batch['labels'].shape)
         # Heavy lifting is moved to engines
         device_batch = model_engine.to_device(batch)
-        ##############################
         loss = model_engine.step(device_batch)
-        ##############################
         loss_vals.append(loss.detach())
+        
         # return
         # Check stopping criteria
         if check_deadline(wallclock_timer, cfg.budget) or step == cfg.train.steps:
@@ -85,7 +73,6 @@ def main_training_process(cfg, setup):
         # Checkpointing is triggered from stopping criteria and normal intervals
         # Checkpoint: /home/donghwan/cramming/outputs/amp_b8192_cb_o4_final/intermediate_state.pth
         if cfg.impl.save_intermediate_checkpoints and step % cfg.impl.save_every_nth_step == 0:
-        # if 1 > 0:
             if loss.detach().isfinite() and cramming.utils.is_main_process() and not cfg.dryrun:
                 model_engine.save_training_checkpoint(checkpoint_rendevous, metadata=dict(step=step, elapsed=time.time() - wallclock_timer))
 
@@ -213,8 +200,6 @@ def communicate_flags(training_allowed, no_recovery_necessary):
 
 @hydra.main(config_path="cramming/config", config_name="cfg_pretrain", version_base="1.1")
 def launch(cfg):
-    # cfg.train.optim.lr = 0.0001
-    # cfg.train.batch_size = 2048
     cfg.impl.compile_torch = False
     pprint.pprint(cfg)
     print('cramming-main/pretrain.py launch')
@@ -223,6 +208,4 @@ def launch(cfg):
 
 
 if __name__ == "__main__":    
-    # nan 탐지
-    # torch.autograd.set_detect_anomaly(True)
     launch()

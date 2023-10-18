@@ -67,10 +67,9 @@ class AttentionComponent(torch.nn.Module):
         self.LAYOUT = self.self_attention.LAYOUT
 
     def forward(self, hidden_states, attention_mask: Optional[torch.Tensor] = None):
-        output, matmul_result, heatmap_result = self.self_attention(hidden_states, attention_mask)
+        output, matmul_result = self.self_attention(hidden_states, attention_mask)
         output = self.dense(output)
-        return output, matmul_result, heatmap_result
-        # return self.dense(self.self_attention(hidden_states, attention_mask))
+        return output, matmul_result
 
 
 class FFNComponent(torch.nn.Module):
@@ -99,10 +98,6 @@ class TransformerLayer(torch.nn.Module):
 
     def __init__(self, idx, cfg_arch):
         super().__init__()
-        # print('idx', idx) # 0, 1
-        # print('cfg_arch.hidden_size', cfg_arch.hidden_size)
-        # print('cfg_arch.attention', cfg_arch.attention)
-        # print('cfg_arch.use_bias', cfg_arch.use_bias)
         self.dropout = torch.nn.Dropout(cfg_arch.hidden_dropout_prob, inplace=False)
         self.norm1 = _get_norm_fn(cfg_arch.norm)(cfg_arch.hidden_size, eps=cfg_arch.norm_eps)
         self.norm2 = _get_norm_fn(cfg_arch.norm)(cfg_arch.hidden_size, eps=cfg_arch.norm_eps)
@@ -122,16 +117,10 @@ class TransformerLayer(torch.nn.Module):
         )
 
     def forward(self, states, attention_mask: Optional[torch.Tensor] = None):
-        states2, matmul_result, heatmap_result = self.attn(self.norm1(states), attention_mask)
+        states2, matmul_result = self.attn(self.norm1(states), attention_mask)
         states = states + self.dropout(states2)
         states = states + self.dropout(self.ffn(self.norm2(states)))
-        return states, matmul_result, heatmap_result
-        
-        # states = states + self.dropout(self.attn(self.norm1(states), attention_mask))
-        # states = states + self.dropout(self.ffn(self.norm2(states)))
-        # return states
-
-
+        return states, matmul_result
 
 class ScriptableLM(PreTrainedModel):
     """Simplified transformer wrapper."""
@@ -145,7 +134,6 @@ class ScriptableLM(PreTrainedModel):
         self.embedding = EmbeddingComponent(self.cfg.embedding, self.cfg.norm, self.cfg.norm_eps)
         self.layers = torch.nn.ModuleList([TransformerLayer(idx, self.cfg) for idx in range(self.cfg.num_transformer_layers)])
         self.seq_first = self.layers[0].LAYOUT == "[S B H]" if len(self.layers) > 0 else False
-        # print('self.seq_first', self.seq_first)
         self.use_causal_attention = self.cfg.attention.causal_attention
 
         if self.cfg.final_norm:
@@ -158,15 +146,12 @@ class ScriptableLM(PreTrainedModel):
     
         if attention_mask is not None:
             attention_mask = get_extended_attention_mask(attention_mask, input_ids.shape, self.use_causal_attention)
-        # print('ScriptableLM input_ids', input_ids.dtype)
         hidden_states = self.embedding(input_ids)
-        # print('ScriptableLM hidden_states', hidden_states.dtype)
-        # print('after embedding', hidden_states.shape)
         if self.seq_first:
             hidden_states = hidden_states.transpose(0, 1).contiguous()
 
         for i, layer_module in enumerate(self.layers):
-            hidden_states, matmul, heatmap_result = layer_module(hidden_states, attention_mask)
+            hidden_states, matmul = layer_module(hidden_states, attention_mask)
             matmuls.append(matmul)
 
         if self.seq_first:
@@ -224,8 +209,6 @@ class ScriptableLMForPreTraining(PreTrainedModel):
         len_matmuls = len(matmuls_from_enc)
 
         if self.sparse_prediction and labels is not None:
-            # print('self.sparse_prediction and labels is not None')
-            # 여기
             masked_lm_loss = self._forward_sparse(outputs, labels)
             
             self.count += 1
@@ -276,8 +259,7 @@ class ScriptableLMForPreTraining(PreTrainedModel):
                     plt.xlabel('Steps')
                 plt.savefig('matmuls.png')
                 plt.clf()
-            ######################################
-                
+            ######################################                
             
         else:
             outputs = self.decoder(self.prediction_head(outputs))
@@ -363,7 +345,7 @@ class ScriptableLMForSequenceClassification(PreTrainedModel):
                     self.problem_type = "single_label_classification"
                 else:
                     self.problem_type = "multi_label_classification"
-            # print(colored('self.problem_type: {}'.format(self.problem_type), 'green'))
+                    
             if self.problem_type == "regression":
                 loss_fct = torch.nn.MSELoss()
                 if self.num_labels == 1:
@@ -429,8 +411,7 @@ class ScriptableLMForSequenceClassification(PreTrainedModel):
                 plt.xlabel('Steps')
             plt.savefig(os.path.join(self.cfg.task_name, 'matmuls.png'))
             plt.clf()
-        ######################################
-                     
+        ######################################                     
         
         return dict(logits=logits, loss=loss)
 

@@ -37,8 +37,6 @@ class crammedBertConfig(PretrainedConfig):
 
 def construct_crammed_bert_modified(cfg_arch, vocab_size, downstream_classes=None):
     """See the config file for details on what is possible."""
-    # print('construct_crammed_bert')
-    # print('cfg_arch\n',cfg_arch)
     config = crammedBertConfig(OmegaConf.to_container(cfg_arch, resolve=True))
     config.arch["embedding"]["vocab_size"] = vocab_size
     config.arch["num_labels"] = downstream_classes
@@ -72,8 +70,6 @@ class FFNComponent(torch.nn.Module):
         self.dense_out = torch.nn.Linear(intermed_output_size, hidden_size, bias=use_bias)
 
     def forward(self, hidden_states):
-        # print('ffn hidden_states', hidden_states.dtype)
-        # print('after ffn', self.dense_out(self.nonlin(self.dense_in(hidden_states))).dtype)
         return self.dense_out(self.nonlin(self.dense_in(hidden_states)))
 
 class AttentionComponent_modified(torch.nn.Module):
@@ -88,8 +84,6 @@ class AttentionComponent_modified(torch.nn.Module):
         self.LAYOUT = self.self_attention.LAYOUT
 
     def forward(self, hidden_states, attention_mask: Optional[torch.Tensor] = None):
-        # hidden_states = hidden_states.type(torch.float32)
-        # print('hidden_states', hidden_states.dtype)
         output, matmul_result = self.self_attention(hidden_states, attention_mask)
         output = self.dense(output)
         return output, matmul_result
@@ -119,15 +113,10 @@ class TransformerLayer_modified(torch.nn.Module):
         )  
         
     def forward(self, states, attention_mask: Optional[torch.Tensor] = None):
-        # print('tf states', states.dtype)
-        # states = states.type(torch.float32)
         states2, matmul_result = self.attn(self.norm1(states), attention_mask)
-        # print('after att states2', states2.dtype)
-        # print('after dropout(states2)', self.dropout(states2).dtype)
         states = states + self.dropout(states2)
-        # print('after residual conn', states.dtype)
         states = states + self.dropout(self.ffn(self.norm2(states)))
-        # print('after second residual conn', states.dtype)
+        
         return states, matmul_result
  
 class ScriptableLM_modified(PreTrainedModel):
@@ -153,23 +142,17 @@ class ScriptableLM_modified(PreTrainedModel):
 
     def forward(self, input_ids, attention_mask: Optional[torch.Tensor] = None, labels: Optional[torch.Tensor] = None):
         matmuls = []
-        # print('input_ids', input_ids.dtype)
-        # print('attention_mask', attention_mask.dtype) # attention_mask = None
         
         if attention_mask is not None:
             attention_mask = get_extended_attention_mask(attention_mask, input_ids.shape, self.use_causal_attention)
         hidden_states = self.embedding(input_ids)
-        # hidden_states = hidden_states.type(torch.float64)
-        # print('hidden_states', hidden_states.dtype)
 
         if self.seq_first:
             hidden_states = hidden_states.transpose(0, 1).contiguous()
         
         for i, layer_module in enumerate(self.layers):
             hidden_states, matmul = layer_module(hidden_states, attention_mask)
-            # print('hidden_states', hidden_states.dtype)
             matmuls.append(matmul)
-            # print('{} matmul norm'.format(i), torch.norm(matmul, p=float('inf')))
             
         if self.seq_first:
             hidden_states = hidden_states.transpose(0, 1).contiguous()
@@ -191,7 +174,6 @@ class ScriptableLMForPreTraining_modified(PreTrainedModel):
         if not self.cfg.skip_head_transform:
             self.prediction_head = PredictionHeadComponent(self.cfg)
         else:
-            # 여기
             self.prediction_head = torch.nn.Identity()  # from linear in old version
 
         self.decoder = torch.nn.Linear(self.cfg.embedding.embedding_dim, self.cfg.embedding.vocab_size, bias=self.cfg.decoder_bias)
@@ -208,9 +190,6 @@ class ScriptableLMForPreTraining_modified(PreTrainedModel):
         self.last_100_loss_list = []
         self.matmul_results = [[] for _ in range(self.cfg.num_transformer_layers)]
         self.best_loss = 0
-        
-        # self.cfg.attention.sequence_op = 'exp_power_app'
-        # print('dddd', self.cfg)
 
     def _init_weights(self, module=None):
         modules = self.modules() if module is None else [module]
@@ -224,7 +203,6 @@ class ScriptableLMForPreTraining_modified(PreTrainedModel):
             )
 
     def forward(self, input_ids, attention_mask: Optional[torch.Tensor] = None, labels: Optional[torch.Tensor] = None, **kwargs):
-        # print('self', self)
         outputs, matmuls_from_enc = self.encoder(input_ids, attention_mask)
         outputs = outputs.view(-1, outputs.shape[-1])
 
@@ -252,14 +230,16 @@ class ScriptableLMForPreTraining_modified(PreTrainedModel):
                 norm_i = torch.norm(matmuls_from_enc[i], p=float('inf'))
                 print('Matmul_{}: {}'.format(i, norm_i.item()))
                 self.matmul_results[i].append(norm_i.item())
-                
-            ######################################
+            # Impose a norm penalty    
+            ###################################### 
                 # Loss 추가
                 if norm_i > 160:
                     masked_lm_loss += 10 * norm_i
             print('Norm Penalty: O')
             ######################################
                 
+            # Plot loss and matmuls  
+            ######################################
             if self.count % 100 == 0:
                 plt.plot(self.x_list, self.loss_list)
                 plt.title('Loss')
@@ -278,6 +258,7 @@ class ScriptableLMForPreTraining_modified(PreTrainedModel):
                     plt.xlabel('Steps')
                 plt.savefig('matmuls.png')
                 plt.clf()
+            ######################################
             
         else:
             outputs = self.decoder(self.prediction_head(outputs))
@@ -317,8 +298,6 @@ class ScriptableLMForSequenceClassification_modified(PreTrainedModel):
         super().__init__(config)
         self.cfg = OmegaConf.create(config.arch)
         self.num_labels = self.cfg.num_labels
-        
-        # print('dddddddddddd self.cfg', self.cfg)
 
         self.encoder = ScriptableLM_modified(config)
         self.pooler = PoolingComponent(self.cfg.classification_head, self.cfg.hidden_size)
@@ -347,13 +326,10 @@ class ScriptableLMForSequenceClassification_modified(PreTrainedModel):
             )
 
     def forward(self, input_ids, attention_mask: Optional[torch.Tensor] = None, labels: Optional[torch.Tensor] = None, **kwargs):
-                
-        
-        # print(colored('ScriptableLMForSequenceClassification_modified', 'yellow'))
         encoder_output,  matmuls_from_enc = self.encoder(input_ids, attention_mask)
-        # print('encoder_output', encoder_output)
+        
         logits = self.head(self.pooler(encoder_output))
-        # print(colored('logits: {}'.format(logits), 'yellow'))
+        
         if labels is not None:
             if self.problem_type is None:  # very much from huggingface
                 if self.num_labels == 1:
@@ -362,7 +338,7 @@ class ScriptableLMForSequenceClassification_modified(PreTrainedModel):
                     self.problem_type = "single_label_classification"
                 else:
                     self.problem_type = "multi_label_classification"
-            # print(colored('self.problem_type: {}'.format(self.problem_type), 'yellow'))
+            
             if self.problem_type == "regression":
                 loss_fct = torch.nn.MSELoss()
                 if self.num_labels == 1:
@@ -399,11 +375,16 @@ class ScriptableLMForSequenceClassification_modified(PreTrainedModel):
             norm_i = torch.norm(matmuls_from_enc[i], p=float('inf'))
             # print('Matmul_{}: {}'.format(i, norm_i.item()))
             self.matmul_results[i].append(norm_i.item())
-            
-            # # Loss 추가
+             
+            # # Impose a norm penalty    
+            # ######################################
             # if norm_i > 450:
             #     loss += 0.1 * norm_i
+            # print('Norm Penalty: O')
+            # ######################################
             
+        # Plot loss and matmuls  
+        ######################################
         if self.count % 100 == 0:
             plt.plot(self.x_list, self.loss_list)
             plt.title('Loss')
@@ -422,5 +403,6 @@ class ScriptableLMForSequenceClassification_modified(PreTrainedModel):
                 plt.xlabel('Steps')
             plt.savefig(os.path.join(self.cfg.task_name, 'matmuls.png'))
             plt.clf()
+        ######################################
                      
         return dict(logits=logits, loss=loss)

@@ -10,8 +10,6 @@ import logging
 from .attention_modified import SeqFirstSelfAttention_modified
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-# cmap = cm.bwr
-# norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
 
 log = logging.getLogger(__name__)
 
@@ -28,8 +26,7 @@ def get_attention_mechanism(
     hidden_size,
     cfg_attention,
 ):
-    # print('cfg_attention', cfg_attention)
-    # print('cfg_attention.type', cfg_attention.type)
+    
     cfg_attention.type = cfg_attention['type']
     
     if cfg_attention.type == "self-attention":
@@ -182,32 +179,21 @@ class LegacySeqFirstSelfAttention(torch.nn.Module):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_attention_heads = cfg_attention.num_attention_heads
-        # 64
         self.hidden_per_head = self.hidden_size // cfg_attention.num_attention_heads
-        # print('self.hidden_per_head', self.hidden_per_head)
         self.register_buffer("norm_factor", torch.tensor(self.hidden_per_head).rsqrt())
 
         # Strided linear layer.
-        # Linear(768, 2304)
         self.query_key_value = torch.nn.Linear(self.hidden_size, 3 * self.hidden_size, bias=cfg_attention.qkv_bias)
         self.output_dim = hidden_size # 768
-        # print('self.query_key_value', self.query_key_value)
-        # print('self.output_dim', self.output_dim)
         if cfg_attention.rotary_embedding == "sanity":
-            # print('cfg_attention.rotary_embedding == "sanity":')
             self.rotary_emb = RotarySanityCheck(self.hidden_per_head, seq_dim=0)
         elif cfg_attention.rotary_embedding == "v2":
-            # print('cfg_attention.rotary_embedding == "v2":')
             self.rotary_emb = RotaryEleutherAI(self.hidden_per_head)
         elif cfg_attention.rotary_embedding == "llama":
-            # print('cfg_attention.rotary_embedding == "llama":')
             self.rotary_emb = RotaryLLAMA(self.hidden_per_head)
         elif cfg_attention.rotary_embedding:
-            # print('cfg_attention.rotary_embedding:')
             self.rotary_emb = Rotary(self.hidden_per_head, seq_dim=0)
         else:
-            # print('self.rotary_emb = None')
-            # 여기
             self.rotary_emb = None
 
         if cfg_attention.sequence_op == "torch-softmax":
@@ -240,7 +226,6 @@ class LegacySeqFirstSelfAttention(torch.nn.Module):
 
         # [b, np, sq, sk]
         output_size = (query_layer.shape[1], query_layer.shape[2], query_layer.shape[0], key_layer.shape[0])
-        # print('output_size', output_size)
 
         # [sq, b, np, hn] -> [sq, b * np, hn]
         query_layer = query_layer.view(output_size[2], output_size[0] * output_size[1], -1)
@@ -255,8 +240,6 @@ class LegacySeqFirstSelfAttention(torch.nn.Module):
             device=query_layer.device,
         )  # this looks crazy but beta=0 below skips the values of this tensor [so beta is NOT optional...]
 
-        # kernel로 수정 필요
-        ################################
         # Raw attention scores. [b * np, sq, sk]
         matmul_result = torch.baddbmm(
             matmul_result, # input
@@ -310,24 +293,16 @@ class LegacySeqFirstSelfAttention(torch.nn.Module):
         # Query, Key, and Value
         # =====================
         # Attention heads [sq, b, h] --> [sq, b, (np * 3 * hn)]
-        mixed_x_layer = self.query_key_value(hidden_states) # 128 128 2304
-        # log.info('mixed_x_layer: {}'.format(mixed_x_layer))
-        # torch._dynamo.config.verbose=True
-        # torch._dynamo.config.suppress_errors = True
-        # print('\n============== Legacy forward ==============')
-        # print('Legacy forward hidden_states', hidden_states.shape) # 128 128 768
-        # print('Legacy forward mixed_x_layer', mixed_x_layer.shape)
+        mixed_x_layer = self.query_key_value(hidden_states)
 
         # [sq, b, (np * 3 * hn)] --> [sq, b, np, 3 * hn]
         # new_tensor_shape = mixed_x_layer.size()[:-1] + (self.num_attention_heads, 3 * self.hidden_per_head)
         mixed_x_layer = mixed_x_layer.view(
             hidden_states.shape[0], hidden_states.shape[1], self.num_attention_heads, 3 * self.hidden_per_head
         )
-        # print('after view Legacy forward mixed_x_layer', mixed_x_layer.shape)
 
         # [sq, b, np, 3 * hn] --> 3 [sq, b, np, hn]
         (query_layer, key_layer, value_layer) = torch.split(mixed_x_layer, [self.hidden_per_head] * 3, dim=3)
-        # print('Legacy forward query_layer', query_layer.shape) # 128 128 12 64
         
         if self.rotary_emb is not None:
             query_layer, key_layer = self.rotary_emb(query_layer, key_layer)
@@ -335,23 +310,14 @@ class LegacySeqFirstSelfAttention(torch.nn.Module):
         # ==================================
         # Attention computation
         # ==================================
+        context_layer, matmul_result = self.attention(query_layer, key_layer, value_layer, attention_mask, self.training)
         
-        # context_layer = self.attention(query_layer, key_layer, value_layer, attention_mask, self.training)
-        
-        context_layer, matmul_result, heatmap_result = self.attention(query_layer, key_layer, value_layer, attention_mask, self.training)
-        
-        # print('legacy forward context_layer', context_layer[0].shape, context_layer[1].shape)
-        # print('Legacy forward context_layer', context_layer.shape)
         # [b, np, sq, hn] --> [sq, b, np, hn]
         context_layer = context_layer.permute(2, 0, 1, 3).contiguous()
-        # print('after permute Legacy forward context_layer', context_layer.shape)
 
         # [sq, b, np, hn] --> [sq, b, hp]
-        # new_context_layer_shape = context_layer.size()[:-2] + (self.hidden_size,)
         context_layer = context_layer.view(context_layer.shape[0], context_layer.shape[1], self.hidden_size)
-        # print('after view Legacy forward context_layer', context_layer.shape)
-        # print('============== Legacy forward end ==============\n')
-        return context_layer, matmul_result, heatmap_result
+        return context_layer, matmul_result
 
 class SeqFirstSelfAttention(LegacySeqFirstSelfAttention):
     """Self-attention layer.
@@ -371,74 +337,17 @@ class SeqFirstSelfAttention(LegacySeqFirstSelfAttention):
         # Raw attention scores. [b, np, s, s]
         # ===================================
         # [b, np, sq, sk]
-        # print('\n============== Seq attention ==============')
-        # print('Seq attention query_layer', query_layer.shape)
-        # print('Seq attention key_layer', key_layer.shape)
-        # print('Seq attention value_layer', value_layer.shape)
         
         output_size = (query_layer.shape[1], query_layer.shape[2], query_layer.shape[0], key_layer.shape[0])
-        # print('Seq attention output_size', output_size)
         # [sq, b, np, hn] -> [sq, b * np, hn]
         query_layer = query_layer.view(output_size[2], output_size[0] * output_size[1], -1)
-        # print('after view Seq attention query_layer', query_layer.shape)
         key_layer = key_layer.view(output_size[3], output_size[0] * output_size[1], -1)
 
-        #######################################
         # this better be fused in a clever way:
-        # QK^T
-        # print('\n============== matmul ==============')
-        # print('before transpose query_layer', query_layer.shape)
-        # print('after transpose query_layer', query_layer.transpose(0, 1).shape)
-        # print('before transpose key_layer', key_layer.shape)
-        # print('after transpose 1 key_layer', key_layer.transpose(0, 1).shape)
-        # print('after transpose 2 key_layer', key_layer.transpose(0, 1).transpose(1, 2).shape)        
-        # gpu 0, self.norm_factor: 0.0361
         matmul_result = torch.bmm(query_layer.transpose(0, 1), key_layer.transpose(0, 1).transpose(1, 2)) * self.norm_factor
-        # print('seq att matmul softmax', matmul_result.shape)
-        # print('matmul_result.get_device()', matmul_result.get_device())
-        # print('self.norm_factor', self.norm_factor)
-        # print('Seq attention matmul_result', matmul_result.shape)
-        # print('============== matmul end ==============\n')
-        #######################################
-        
-        # #######################################
-        # shape_0 = query_layer.shape[1] # 32
-        # shape_1 = query_layer.shape[0] # 128
-        # shape_2 = query_layer.shape[0] # 128
-        # query_layer_ = query_layer.transpose(0, 1)
-        # key_layer_ = key_layer.transpose(0, 1)
-        
-        # matmul_result = torch.zeros(shape_0, shape_1, shape_2)
-        # matmul_result = matmul_result.to('cuda')
-        
-        # for b in range(shape_0):
-        #     for row in range(shape_1):
-        #         for col in range(shape_2):
-        #             matmul_result[b][row][col] = torch.norm(query_layer_[b][row] - key_layer_[b][col]) ** 2
-        
-        # matmul_result *= -self.norm_factor * 0.5
-        # print('matmul_result', matmul_result.shape)
-        #######################################
-        
-        # # GK
-        # query_layer_ = query_layer.transpose(0, 1)
-        # key_layer_ = key_layer.transpose(0, 1)
-        # matmul_result = subtraction_gaussian_kernel_torch(query_layer_, key_layer_)
-        # matmul_result *= -self.norm_factor * 0.5
-        # # matmul_result를 before_att라는 output으로 빼고 싶음
-        # # print('matmul_result gau', matmul_result.shape)
-        
-        
         
         # change view to [b, np, sq, sk]
         attention_scores = matmul_result.view(output_size[0], output_size[1], output_size[2], output_size[3])
-        # print('seq att attention_scores', attention_scores.shape)
-        # print('seq att head 0 att score', attention_scores[0][0])
-
-        
-        heatmap_result = torch.squeeze(attention_scores, 0)
-        heatmap_result = torch.mean(heatmap_result, dim=0)
-        # print('heatmap_results', heatmap_results.shape)
         
         # ===========================
         # Attention probs and dropout
@@ -446,14 +355,12 @@ class SeqFirstSelfAttention(LegacySeqFirstSelfAttention):
         # attention scores and attention mask [b, np, sq, sk]
         # sequence: softmax 등 적용
         attention_probs = self.sequence_op(attention_scores, attention_mask)
-        # print('seq att attention_probs', attention_probs.shape)
+        
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
         # [And in great ML tradition I keep this comment in place as it was in megatron and huggingface-bert before :>]
-        # attention_probs = self.attention_dropout(attention_probs)
-        
+        # attention_probs = self.attention_dropout(attention_probs)        
         attention_probs = torch.nn.functional.dropout(attention_probs, p=self.attention_dropout, training=training)
-        # attention_probs = torch.nn.functional.dropout(attention_probs, p=0, training=training)
         
         # =========================
         # Context layer. [sq, b, hp]
@@ -464,24 +371,19 @@ class SeqFirstSelfAttention(LegacySeqFirstSelfAttention):
 
         # context layer shape: [b, np, sq, hn]
         output_size = (value_layer.shape[1], value_layer.shape[2], query_layer.shape[0], value_layer.shape[3])
-        # print('Seq attention output_size', output_size)
 
         # change view [sk, b * np, hn]
         value_layer = value_layer.view(value_layer.size(0), output_size[0] * output_size[1], -1)
-        # print('Seq attention value_layer', value_layer.shape)
 
         # change view [b * np, sq, sk]
         attention_probs = attention_probs.view(output_size[0] * output_size[1], output_size[2], -1)
-        # print('after view Seq attention attention_probs', attention_probs.shape)
+        
         # matmul: [b * np, sq, hn]
-        # softmax 결과(prob dist)와 V 곱함
         context_layer = torch.bmm(attention_probs, value_layer.transpose(0, 1))
-        # print('Seq attention context_layer', context_layer.shape)
+        
         # change view [b, np, sq, hn]
         context_layer = context_layer.view(*output_size)
-        # print('after view Seq attention context_layer', context_layer.shape)
-        # print('============== Seq attention end ==============\n')
-        return context_layer, matmul_result, heatmap_result
+        return context_layer, matmul_result
     
 class FlashMultiHeadAttention(torch.nn.Module):
     """Wrapper for flash MHA."""
