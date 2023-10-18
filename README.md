@@ -2,7 +2,7 @@
 
 You can find the non-softmax settings in `cramming/config/arch/crammed-bert.yaml`. In `crammed-bert.yaml`,
 * If you want to pretrain with original softmax attention, set `architectures=ScriptableCrammedBERT`, `attention.type=self-attention` and `attention.sequence_op=torch-softmax`.
-* If you want to pretrain with non-softmax attention, set `architectures=ScriptableCrammedBERT-modified`, `attention.type=self-attention-modified` and `attention.sequence_op={what you want}`. The sequence_op includes `exp, exp_power_app and exp_poly_app`, etc.
+* If you want to pretrain with non-softmax attention, set `architectures=ScriptableCrammedBERT-modified`, `attention.type=self-attention-modified` and `attention.sequence_op={what you want}`. The `sequence_op` includes `exp, exp_power_app and exp_poly_app`, etc.
 
 If you want to pretrain model in our setting, run in terminal:
 ```
